@@ -2,7 +2,7 @@ name: Oracle Always Free A1 Auto-Claimer
 
 on:
   schedule:
-    # Triggers every 30 minutes in GitHub's cloud
+    # Runs every 30 minutes in GitHub's cloud
     - cron: '*/30 * * * *'
   workflow_dispatch: # Allows manual trigger anytime
 
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   claim-oracle-instance:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - name: Set up OCI CLI
         run: |
@@ -67,17 +67,18 @@ jobs:
           # 5. Write Public SSH Key
           echo "${OCI_SSH_PUBLIC_KEY}" > /tmp/authorized_keys.pub
 
-          # 6. Continuous 15-cycle active loop (~40 minutes per runner)
-          for ATTEMPT in $(seq 1 15); do
+          # 6. Continuous 10-cycle active loop prioritizing 6 GB first
+          for ATTEMPT in $(seq 1 10); do
             echo "---------------------------------------------------------"
-            echo "--- [Cycle $ATTEMPT of 15] $(date -u '+%Y-%m-%d %H:%M:%S UTC') ---"
+            echo "--- [Cycle $ATTEMPT of 10] $(date -u '+%Y-%m-%d %H:%M:%S UTC') ---"
             
-            echo "Checking Priority 1: 4 OCPUs & 24 GB RAM..."
+            # --- PRIORITY 1: 1 OCPU & 6 GB RAM (Fastest claim, opens up frequently) ---
+            echo "Checking Priority 1: 1 OCPU & 6 GB RAM..."
             RESULT=$(oci compute instance launch \
               --compartment-id "$COMPARTMENT_ID" \
               --availability-domain "$AD" \
               --shape "VM.Standard.A1.Flex" \
-              --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
+              --shape-config '{"ocpus": 1, "memoryInGBs": 6}' \
               --image-id "$IMAGE_ID" \
               --subnet-id "$SUBNET_ID" \
               --display-name "precise-reach" \
@@ -85,12 +86,13 @@ jobs:
               --ssh-authorized-keys-file /tmp/authorized_keys.pub 2>&1 || true)
 
             if echo "$RESULT" | grep -q '"lifecycle-state": "PROVISIONING"'; then
-              echo "🎉🎉🎉 SUCCESS! Instance is PROVISIONING with 4 OCPUs & 24 GB RAM! 🎉🎉🎉"
+              echo "🎉🎉🎉 SUCCESS! Instance is PROVISIONING with 1 OCPU & 6 GB RAM! 🎉🎉🎉"
               echo "$RESULT" | grep -E '"id"|"lifecycle-state"|"display-name"'
               exit 0
             fi
 
-            echo "4/24 busy. Checking Priority 2: 2 OCPUs & 12 GB RAM..."
+            # --- PRIORITY 2: 2 OCPUs & 12 GB RAM ---
+            echo "1/6 busy. Checking Priority 2: 2 OCPUs & 12 GB RAM..."
             RESULT2=$(oci compute instance launch \
               --compartment-id "$COMPARTMENT_ID" \
               --availability-domain "$AD" \
@@ -108,12 +110,13 @@ jobs:
               exit 0
             fi
 
-            echo "2/12 busy. Checking Priority 3: 1 OCPU & 6 GB RAM..."
+            # --- PRIORITY 3: 4 OCPUs & 24 GB RAM ---
+            echo "2/12 busy. Checking Priority 3: 4 OCPUs & 24 GB RAM..."
             RESULT3=$(oci compute instance launch \
               --compartment-id "$COMPARTMENT_ID" \
               --availability-domain "$AD" \
               --shape "VM.Standard.A1.Flex" \
-              --shape-config '{"ocpus": 1, "memoryInGBs": 6}' \
+              --shape-config '{"ocpus": 4, "memoryInGBs": 24}' \
               --image-id "$IMAGE_ID" \
               --subnet-id "$SUBNET_ID" \
               --display-name "precise-reach" \
@@ -121,16 +124,16 @@ jobs:
               --ssh-authorized-keys-file /tmp/authorized_keys.pub 2>&1 || true)
 
             if echo "$RESULT3" | grep -q '"lifecycle-state": "PROVISIONING"'; then
-              echo "🎉🎉🎉 SUCCESS! Instance is PROVISIONING with 1 OCPU & 6 GB RAM! 🎉🎉🎉"
+              echo "🎉🎉🎉 SUCCESS! Instance is PROVISIONING with 4 OCPUs & 24 GB RAM! 🎉🎉🎉"
               echo "$RESULT3" | grep -E '"id"|"lifecycle-state"|"display-name"'
               exit 0
             fi
 
-            if [ $ATTEMPT -lt 15 ]; then
-              echo "⏳ All shapes busy in Chicago. Sleeping 45s before next cycle in this runner..."
-              sleep 45
+            if [ $ATTEMPT -lt 10 ]; then
+              echo "⏳ All shapes busy in Chicago. Sleeping 35s before next cycle in this runner..."
+              sleep 35
             fi
           done
 
-          echo "⏳ Completed 15 cycles (~40 mins). Relinquishing runner. Next run will take over."
+          echo "⏳ Completed 10 cycles (~30 mins). Relinquishing runner. Next run will take over."
           exit 0
